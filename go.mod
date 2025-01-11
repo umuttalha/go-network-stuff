@@ -7,6 +7,7 @@ toolchain go1.23.4
 require (
 	github.com/asticode/go-astiav v0.29.0 // indirect
 	github.com/asticode/go-astikit v0.42.0 // indirect
+	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/go-gst/go-glib v1.4.0 // indirect
 	github.com/go-gst/go-gst v1.4.0 // indirect
@@ -41,6 +42,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/stretchr/testify v1.10.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
+	go.uber.org/ratelimit v0.3.1 // indirect
 	golang.org/x/crypto v0.32.0 // indirect
 	golang.org/x/exp v0.0.0-20240909161429-701f63a606c0 // indirect
 	golang.org/x/net v0.34.0 // indirect
