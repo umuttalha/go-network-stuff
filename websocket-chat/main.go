@@ -3,176 +3,72 @@ package main
 import (
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 
 	"github.com/gorilla/websocket"
 )
 
-// Define a WebSocket upgrader
-// spesifik ip banlama burada olabilir
-
-var bannedIPs = map[string]bool{
-	"192.168.1.100": true, // Example banned IP
-	"10.0.0.5":      true, // Another banned IP
-}
-
+// WebSocket bağlantısını yükseltmek için bir upgrade fonksiyonu
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		// Get the client's IP address
-		ip := r.RemoteAddr
 
-		fmt.Printf(ip)
+		// Sadece "https://example.com" ve "http://localhost:3000" origin'lerine izin ver
 
-		// Check if the IP is banned
-		if bannedIPs[ip] {
-			log.Printf("Banned IP tried to connect: %s\n", ip)
-			return false // Reject the connection
+		// 1. Sadece HTTPS bağlantılarına izin ver
+		// if r.TLS == nil {
+		//     return false
+		// }
+
+		allowedOrigins := []string{
+			"https://sisatma.com",
+			"http://localhost:8080",
 		}
 
-		return true // Allow the connection
+		origin := r.Header.Get("Origin")
+		for _, allowedOrigin := range allowedOrigins {
+			if origin == allowedOrigin {
+				return true
+			}
+		}
+
+		return false
 	},
 }
 
-// Define a client struct to hold WebSocket connections
-// burada user bilgileri tanımlanabilir
-type Client struct {
-	conn *websocket.Conn
-	send chan []byte
-	ip   string
-}
-
-// Define a chat server to manage clients
-// burada chat room bilgileri tanımlanaiblir.
-type ChatServer struct {
-	clients    map[*Client]bool
-	broadcast  chan []byte
-	register   chan *Client
-	unregister chan *Client
-}
-
-// Create a new chat server
-func NewChatServer() *ChatServer {
-	return &ChatServer{
-		clients:    make(map[*Client]bool),
-		broadcast:  make(chan []byte),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-	}
-}
-
-// Run the chat server
-// burada kim ne zaman katılmış ne zaman odadan çıkmış loglar tutulabilir
-func (cs *ChatServer) Run() {
-	for {
-		select {
-		case client := <-cs.register:
-			fmt.Printf("odaya girdi\n")
-			fmt.Print(client)
-			cs.clients[client] = true
-		case client := <-cs.unregister:
-			fmt.Printf("odadan çıktı\n")
-			if _, ok := cs.clients[client]; ok {
-				delete(cs.clients, client)
-				close(client.send)
-			}
-		case message := <-cs.broadcast:
-			for client := range cs.clients {
-				select {
-				case client.send <- message:
-				default:
-					close(client.send)
-					delete(cs.clients, client)
-				}
-			}
-		}
-	}
-}
-
-// Handle WebSocket connections
-func (cs *ChatServer) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Println("WebSocket upgrade failed:", err)
-		return
-	}
-
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		log.Println("Error extracting IP:", err)
-		return
-	}
-
-	client := &Client{conn: conn, send: make(chan []byte, 256), ip: ip}
-	cs.register <- client
-
-	go client.WritePump(cs)
-	go client.ReadPump(cs)
-
-	client.send <- []byte("Your IP: " + ip)
-}
-
-// Read messages from the client
-func (c *Client) ReadPump(cs *ChatServer) {
-
-	// kullanıcı ayrılınca bu çalışıyor
-	defer func() {
-		fmt.Print("odadan ayrıldı tekrar")
-		fmt.Print(cs.unregister)
-		cs.unregister <- c
-		c.conn.Close()
-	}()
-
-	for {
-		_, message, err := c.conn.ReadMessage()
-		if err != nil {
-			log.Println("WebSocket read error:", err)
-			break
-		}
-
-		formattedMessage := fmt.Sprintf("[%s]: %s", c.ip, string(message))
-		cs.broadcast <- []byte(formattedMessage)
-	}
-}
-
-// Write messages to the client
-func (c *Client) WritePump(cs *ChatServer) {
-	defer func() {
-		c.conn.Close()
-	}()
-
-	for {
-		select {
-		case message, ok := <-c.send:
-			if !ok {
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
-				return
-			}
-			err := c.conn.WriteMessage(websocket.TextMessage, message)
-			if err != nil {
-				log.Println("WebSocket write error:", err)
-				return
-			}
-		}
-	}
-}
-
 func main() {
-	chatServer := NewChatServer()
-	go chatServer.Run()
+	// WebSocket bağlantısını dinleyecek endpoint
+	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		// HTTP bağlantısını WebSocket'e yükselt
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Println("WebSocket bağlantısı kurulamadı:", err)
+			return
+		}
+		defer conn.Close()
 
-	// Serve the WebSocket endpoint
-	http.HandleFunc("/ws", chatServer.HandleWebSocket)
+		fmt.Println("Yeni bir kullanıcı bağlandı!")
 
-	// Serve a simple HTML page for testing
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		http.ServeFile(w, r, "index.html")
+		// Sürekli olarak mesajları dinle
+		for {
+			// Gelen mesajı oku
+			messageType, message, err := conn.ReadMessage()
+			if err != nil {
+				log.Println("Mesaj okunamadı:", err)
+				break
+			}
+
+			// Gelen mesajı ekrana yaz
+			fmt.Printf("Gelen mesaj: %s\n", message)
+
+			// Aynı mesajı kullanıcıya geri gönder
+			if err := conn.WriteMessage(messageType, message); err != nil {
+				log.Println("Mesaj gönderilemedi:", err)
+				break
+			}
+		}
 	})
 
-	// Start the HTTP server
-	log.Println("Chat server started on :8080")
-	err := http.ListenAndServe(":8080", nil)
-	if err != nil {
-		log.Fatal("Server error:", err)
-	}
+	// Sunucuyu başlat
+	fmt.Println("WebSocket sunucusu 8080 portunda çalışıyor...")
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
